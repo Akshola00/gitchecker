@@ -1,0 +1,30 @@
+Repository Statistics for: /home/user/my-project
+==============================================
+
+📊 COMMIT STATISTICS
+  Total commits: 247
+  Commits this month: 12
+  Commits this week: 3
+  Latest commit: 2024-08-15 (3 days ago)
+
+🌿 BRANCH INFORMATION  
+  Total branches: 8
+  Active branches: 5
+  Main branch: main
+  Current branch: feature/login
+
+👥 CONTRIBUTORS (Top 5)
+  1. john.doe@example.com     - 156 commits (63%)
+  2. jane.smith@example.com   - 67 commits (27%)  
+  3. bob.wilson@example.com   - 18 commits (7%)
+  4. alice.jones@example.com  - 6 commits (3%)
+
+📅 ACTIVITY TIMELINE
+  Last 7 days:  ████████░░ 8 commits
+  Last 30 days: ██████░░░░ 23 commits
+  Last year:    ████████████ 247 commits
+
+📁 REPOSITORY INFO
+  Repository size: 2.3 MB
+  Total files tracked: 89
+  Languages: Rust (78%), JavaScript (15%), Other (7%)
