@@ -147,7 +147,7 @@ fn handle_stats(
     commit_stat.total_commits = all_oids.len() as u32;
 
     // logic to get last commit date
-    if let Some(last_oid) = all_oids.last() {
+    if let Some(last_oid) = all_oids.first() {
         let last_commit = repo.find_commit(*last_oid).expect("Last commit not found");
         let last_commit_time = last_commit.time();
         let last_commit_date_time_format =
@@ -193,7 +193,7 @@ fn handle_stats(
     Commits this month: {}
     Commits this week: {}
     Commits today: {}
-    Last commit time: {} (3 days ago)
+    Last commit time: {}, {} days ago
 
     ",
         path,
@@ -201,24 +201,15 @@ fn handle_stats(
         commit_stat.commits_this_month,
         commit_stat.commits_this_week,
         commit_stat.commits_today,
-        commit_stat.last_commit_time
+        commit_stat.last_commit_time,
+        convert_time_to_days_ago(commit_stat.last_commit_time)
     )
 }
 
-fn convert_time_to_days_ago(time: DateTime<Utc>) -> u32 {
-    // ymd 2025-01-23 - 2025-01-25
+fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
     let now = Utc::now();
-    // convert time from date time to epoch
-    let time_epoch = time.timestamp();
-    // convert today to epoch 
-    let today_start: DateTime<Utc> = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
-    let today_epoch = today_start.timestamp();
-    // minus today - that time 
-    let diffrence = today_epoch - time_epoch;
-    // convert the time to date time
-    let converted_time = DateTime::from_timestamp(diffrence, 0).expect("invalid");
-    // get the day 
-    0
+    let diffrence = now - time;
+    diffrence.num_days()
 }
 
 // # Analyze a repository's statistics
