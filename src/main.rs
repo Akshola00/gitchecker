@@ -1,9 +1,9 @@
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use clap::error::Result;
 use clap::{Parser, Subcommand, arg, command};
-use git2::{Repository, Sort, oid_array};
-use std::fmt::format;
-use std::fs::ReadDir;
+use git2::{Repository, Sort};
+// use std::fmt::format;
+// use std::fs::ReadDir;
 use std::path::{Path, PathBuf};
 use std::{fs, process};
 
@@ -75,7 +75,6 @@ fn main() {
                 handle_stats(path, since, format);
             }
             Commands::Find { path, exclude } => {
-                println!("'myapp add' was used, path is: {path:?}");
                 handle_find(path, exclude);
             }
             Commands::Clean { path } => {
@@ -89,6 +88,9 @@ fn main() {
 fn handle_stats(path: &PathBuf, since_date: &Option<NaiveDate>, format: &Option<u8>) {
     let mut commit_stat = CommitStats::new();
     let now = Utc::now();
+    let _since_date = since_date;
+    let _format = format;
+
     let month_ago = now - Duration::weeks(4);
     let week_ago = now - Duration::weeks(1);
     let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
@@ -166,7 +168,7 @@ fn handle_stats(path: &PathBuf, since_date: &Option<NaiveDate>, format: &Option<
     )
 }
 
-fn handle_find(path: &PathBuf, exclude: &Option<Vec<String>>){
+fn handle_find(path: &PathBuf, exclude: &Option<Vec<String>>) {
     let read_dir = fs::read_dir(path).unwrap();
 
     for dir in read_dir {
@@ -174,8 +176,11 @@ fn handle_find(path: &PathBuf, exclude: &Option<Vec<String>>){
         let entry_path = entry.path();
         let path_str = entry_path.to_str().unwrap().to_owned();
         let folder_name = entry.file_name().into_string().unwrap();
-        if !exclude.clone().unwrap().contains(&folder_name) {
-            if entry_path.is_dir() && Path::new(&format!("{}/.git", path_str)).exists() {
+        if entry_path.is_dir() && Path::new(&format!("{}/.git", path_str)).exists() {
+            let is_excluded = exclude
+                .as_ref()
+                .map_or(false, |ex| ex.contains(&folder_name));
+            if !is_excluded {
                 println!("Directory with git found {:?}", entry_path);
             }
         }
@@ -188,7 +193,6 @@ fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
     diffrence.num_days()
 }
 
-
 // fn main() {
 //     let paths = fs::read_dir("/Users/macbookpro/Documents/projects").unwrap();
 
@@ -196,4 +200,3 @@ fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
 //         println!("Name: {}", path.unwrap().path().display())
 //     }
 // }
-
