@@ -1,9 +1,45 @@
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 use clap::error::Result;
-use clap::{Arg, ArgAction, Command, arg, command, value_parser};
+use clap::{Parser, Subcommand, arg, command};
 use git2::{Repository, Sort, oid_array};
-use std::path::PathBuf;
-use std::process;
+use std::fmt::format;
+use std::fs::ReadDir;
+use std::path::{Path, PathBuf};
+use std::{fs, process};
+
+#[derive(Parser)]
+#[command(version, about, long_about = None, about="github analyser, hlper & cleaner")]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+    #[arg(short, long)]
+    dry_run: bool,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    #[command(about = "analyze a repository's statistics")]
+    Stats {
+        #[arg(short, long, help = "/path/to/repo")]
+        path: PathBuf,
+        #[arg(short, long, value_parser = clap::value_parser!(NaiveDate), help = "Date 'Since' you want to fetch statistics from", )]
+        since: Option<NaiveDate>,
+        #[arg(short, long, help = "The type you are want it in: 1 - Terminal")]
+        format: Option<u8>,
+    },
+    #[command(about = "find all git repositories in a directory")]
+    Find {
+        #[arg(short, long, help = "/path/to/find-in")]
+        path: PathBuf,
+        #[arg(short, long, help = "Files you to exclude")]
+        exclude: Option<Vec<String>>,
+    },
+    #[command(about = "clean up a repository")]
+    Clean {
+        #[arg(short, long, help = "/path/to/clean")]
+        path: PathBuf,
+    },
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 struct CommitStats {
@@ -25,114 +61,45 @@ impl CommitStats {
         }
     }
 }
+
 fn main() {
-    let matches = command!()
-        .subcommand_required(true)
-        .subcommand(
-            Command::new("stats")
-                .about("Analyze a repository's statistics")
-                .arg(
-                    arg!([path] "/path/to/repo")
-                        .required(true)
-                        .value_parser(value_parser!(PathBuf)),
-                )
-                .arg(
-                    arg!(-s --since <DATE> "Date you want to fetch statistics from")
-                        .value_parser(value_parser!(NaiveDate)),
-                )
-                .arg(arg!(-f --format <FORMAT_TYPE> "The type you are passing it in")),
-        )
-        .subcommand(
-            Command::new("find")
-                .about("Find all git repositories in a directory")
-                .arg(
-                    arg!([path] "path to project")
-                        .required(true)
-                        .value_parser(value_parser!(PathBuf)),
-                )
-                .arg(arg!(-e --exclude <FILES_TO_EXCLUDE> "Files you to exclude")),
-        )
-        .subcommand(
-            Command::new("clean")
-                .about("Clean up a repository")
-                .arg(arg!([path] "path to repo").required(true)),
-        )
-        .arg(
-            Arg::new("dry_run")
-                .short('d')
-                .long("dry_run")
-                .action(ArgAction::SetTrue),
-        )
-        .get_matches();
+    let cli = Cli::parse();
 
-    let dry_run = matches.get_flag("dry_run");
-
-    match matches.subcommand() {
-        Some(("stats", stats)) => {
-            let path = stats
-                .get_one::<PathBuf>("path")
-                .expect("unable to parse path");
-            let since_date = stats.get_one::<NaiveDate>("since");
-            let format = stats.get_one::<String>("format");
-            handle_stats(path, since_date, format, dry_run);
-        }
-        Some(("find", find)) => {
-            println!(
-                "
-                User wants to find all gi repos in a directory
-                Here are the details: \n
-                path: {:?}, \n
-                files to exclude: {:?},
-                ",
-                find.get_one::<String>("path"),
-                find.get_one::<String>("exclude"),
-            )
-        }
-        Some(("clean", clean)) => {
-            println!(
-                "
-                User wants to clean a repo
-                Here are the details: \n
-                path: {:?}, \n
-
-                ",
-                clean.get_one::<String>("path"),
-            )
-        }
-        _ => {
-            println!("not recognized");
-            process::exit(0);
-        }
+    match &cli.command {
+        Some(some_comands) => match some_comands {
+            Commands::Stats {
+                path,
+                since,
+                format,
+            } => {
+                handle_stats(path, since, format);
+            }
+            Commands::Find { path, exclude } => {
+                println!("'myapp add' was used, path is: {path:?}");
+                handle_find(path, exclude);
+            }
+            Commands::Clean { path } => {
+                println!("'myapp add' was used, path is: {path:?}");
+            }
+        },
+        None => todo!(),
     }
 }
 
-fn handle_stats(
-    path: &PathBuf,
-    since_date: Option<&NaiveDate>,
-    format: Option<&String>,
-    dry_run: bool,
-) {
-    // initialze a new commit stat struct
+fn handle_stats(path: &PathBuf, since_date: &Option<NaiveDate>, format: &Option<u8>) {
     let mut commit_stat = CommitStats::new();
-    // get the current time
     let now = Utc::now();
-    // month ago
     let month_ago = now - Duration::weeks(4);
-    // going to a week ago
     let week_ago = now - Duration::weeks(1);
-    // today get the time of when today started
     let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
-    // use the git 2 library to open a github repo path perform error handling
     let repo: Repository = Repository::open(&path).unwrap_or_else(|err| {
         eprintln!("an error occured: {} ", err);
         process::exit(1);
     });
-    // get a revwalk of the repo
     let mut revwalk = repo.revwalk().unwrap_or_else(|err| {
         eprintln!("an error occured: {} ", err);
         process::exit(1);
     });
-    // sort the commits in the rev walk
     revwalk.set_sorting(Sort::TIME).unwrap_or_else(|err| {
         eprintln!("an error occured: {} ", err);
         process::exit(1);
@@ -141,12 +108,9 @@ fn handle_stats(
         eprintln!("an error occured: {} ", err);
         process::exit(1);
     });
-    // for borrowing and mutablity issues - collect all the oids and put in a vec
     let all_oids = revwalk.into_iter().collect::<Result<Vec<_>, _>>().unwrap();
-    // get total commits and store
     commit_stat.total_commits = all_oids.len() as u32;
 
-    // logic to get last commit date
     if let Some(last_oid) = all_oids.first() {
         let last_commit = repo.find_commit(*last_oid).expect("Last commit not found");
         let last_commit_time = last_commit.time();
@@ -155,26 +119,21 @@ fn handle_stats(
         commit_stat.last_commit_time = last_commit_date_time_format;
     }
 
-    // logic to get commits and check weatehr they are in the time frame we want
     for oid in &all_oids {
         let commit = repo.find_commit(*oid).unwrap();
         let commit_time = commit.time();
 
-        // convert the commit time to date time
         let converted_time_of_commit: DateTime<chrono::Utc> =
             DateTime::from_timestamp(commit_time.seconds(), 0).expect("Invalid Time");
 
-        // if thisd commit was this month
         if converted_time_of_commit >= month_ago {
             commit_stat.commits_this_month += 1;
         }
 
-        // if the commit was this week
         if converted_time_of_commit >= week_ago {
             commit_stat.commits_this_week += 1;
         }
 
-        // if the commit was today
         if converted_time_of_commit > today_start {
             commit_stat.commits_today += 1;
         }
@@ -183,6 +142,7 @@ fn handle_stats(
             break;
         }
     }
+
     println!(
         "
     Repository Statistics for: {:?} 
@@ -206,11 +166,34 @@ fn handle_stats(
     )
 }
 
+fn handle_find(path: &PathBuf, exclude: &Option<Vec<String>>){
+    let read_dir = fs::read_dir(path).unwrap();
+
+    for dir in read_dir {
+        let entry = dir.unwrap();
+        let entry_path = entry.path();
+        let path_str = entry_path.to_str().unwrap().to_owned();
+        let folder_name = entry.file_name().into_string().unwrap();
+        if !exclude.clone().unwrap().contains(&folder_name) {
+            if entry_path.is_dir() && Path::new(&format!("{}/.git", path_str)).exists() {
+                println!("Directory with git found {:?}", entry_path);
+            }
+        }
+    }
+}
+
 fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
     let now = Utc::now();
     let diffrence = now - time;
     diffrence.num_days()
 }
 
-// # Analyze a repository's statistics
-// cargo run -- stats /path/to/repo --since "2024-01-01" --format json
+
+// fn main() {
+//     let paths = fs::read_dir("/Users/macbookpro/Documents/projects").unwrap();
+
+//     for path in paths {
+//         println!("Name: {}", path.unwrap().path().display())
+//     }
+// }
+
