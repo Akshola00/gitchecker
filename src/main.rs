@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime, Utc};
 use clap::error::Result;
 use clap::{Parser, Subcommand, arg, command};
 use git2::{Repository, Sort};
@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::{fs, process};
 
 #[derive(Parser)]
-#[command(version, about, long_about = None, about="github analyser, hlper & cleaner")]
+#[command(version, about, long_about = None, about="Github Analyser, Helper & Cleaner")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -61,6 +61,20 @@ impl CommitStats {
         }
     }
 }
+#[derive(Debug, Clone, Copy, Default)]
+struct SinceCommitStat {
+    since_time: NaiveDate,
+    total_commits_since: u32,
+}
+
+impl SinceCommitStat {
+    pub fn new(since_time: NaiveDate) -> Self {
+        Self {
+            since_time,
+            total_commits_since: 0,
+        }
+    }
+}
 
 fn main() {
     let cli = Cli::parse();
@@ -86,10 +100,12 @@ fn main() {
 }
 
 fn handle_stats(path: &PathBuf, since_date: &Option<NaiveDate>, format: &Option<u8>) {
-    let mut commit_stat = CommitStats::new();
     let now = Utc::now();
     let _since_date = since_date;
     let _format = format;
+
+    let mut since_commit_stat = SinceCommitStat::new(_since_date.unwrap());
+    let mut commit_stat = CommitStats::new();
 
     let month_ago = now - Duration::weeks(4);
     let week_ago = now - Duration::weeks(1);
@@ -111,43 +127,63 @@ fn handle_stats(path: &PathBuf, since_date: &Option<NaiveDate>, format: &Option<
         process::exit(1);
     });
     let all_oids = revwalk.into_iter().collect::<Result<Vec<_>, _>>().unwrap();
-    commit_stat.total_commits = all_oids.len() as u32;
 
-    if let Some(last_oid) = all_oids.first() {
-        let last_commit = repo.find_commit(*last_oid).expect("Last commit not found");
-        let last_commit_time = last_commit.time();
-        let last_commit_date_time_format =
-            DateTime::from_timestamp(last_commit_time.seconds(), 0).expect("invalid time");
-        commit_stat.last_commit_time = last_commit_date_time_format;
+    match _since_date {
+        Some(date) => {
+            for oid in &all_oids {
+                let commit = repo.find_commit(*oid).unwrap();
+                let commit_time: git2::Time = commit.time();
+
+                let converted_time_of_commit: DateTime<chrono::Utc> =
+                    DateTime::from_timestamp(commit_time.seconds(), 0).expect("Invalid Time");
+                // NaiveDate
+                let converted_date_time = to_datetime(_since_date.unwrap()).unwrap();
+                if converted_time_of_commit >= converted_date_time {
+                    since_commit_stat.total_commits_since += 1;
+                }
+            }
+        }
+        None => {
+
+            commit_stat.total_commits = all_oids.len() as u32;
+
+            if let Some(last_oid) = all_oids.first() {
+                let last_commit = repo.find_commit(*last_oid).expect("Last commit not found");
+                let last_commit_time = last_commit.time();
+                let last_commit_date_time_format =
+                    DateTime::from_timestamp(last_commit_time.seconds(), 0).expect("invalid time");
+                commit_stat.last_commit_time = last_commit_date_time_format;
+            }
+
+            for oid in &all_oids {
+                let commit = repo.find_commit(*oid).unwrap();
+                let commit_time = commit.time();
+
+                let converted_time_of_commit: DateTime<chrono::Utc> =
+                    DateTime::from_timestamp(commit_time.seconds(), 0).expect("Invalid Time");
+
+                if converted_time_of_commit >= month_ago {
+                    commit_stat.commits_this_month += 1;
+                }
+
+                if converted_time_of_commit >= week_ago {
+                    commit_stat.commits_this_week += 1;
+                }
+
+                if converted_time_of_commit > today_start {
+                    commit_stat.commits_today += 1;
+                }
+
+                if converted_time_of_commit < month_ago {
+                    break;
+                }
+            }
+        }
     }
 
-    for oid in &all_oids {
-        let commit = repo.find_commit(*oid).unwrap();
-        let commit_time = commit.time();
-
-        let converted_time_of_commit: DateTime<chrono::Utc> =
-            DateTime::from_timestamp(commit_time.seconds(), 0).expect("Invalid Time");
-
-        if converted_time_of_commit >= month_ago {
-            commit_stat.commits_this_month += 1;
-        }
-
-        if converted_time_of_commit >= week_ago {
-            commit_stat.commits_this_week += 1;
-        }
-
-        if converted_time_of_commit > today_start {
-            commit_stat.commits_today += 1;
-        }
-
-        if converted_time_of_commit < month_ago {
-            break;
-        }
-    }
-
-    println!(
-        "
-    Repository Statistics for: {:?} 
+    println!("all_commits_for_the_time {:?}", since_commit_stat);
+    let mut commit_stats = format!( "
+    Repository Statistics for: {:?}
     ==============================================
 
     📊 COMMIT STATISTICS
@@ -155,17 +191,21 @@ fn handle_stats(path: &PathBuf, since_date: &Option<NaiveDate>, format: &Option<
     Commits this month: {}
     Commits this week: {}
     Commits today: {}
-    Last commit time: {}, {} days ago
+    Last commit time: {}
 
-    ",
-        path,
+    ", path,
         commit_stat.total_commits,
         commit_stat.commits_this_month,
         commit_stat.commits_this_week,
         commit_stat.commits_today,
         commit_stat.last_commit_time,
-        convert_time_to_days_ago(commit_stat.last_commit_time)
-    )
+        );
+
+    if convert_time_to_days_ago(commit_stat.last_commit_time) > 0 {
+        commit_stats.push_str(&format!(", {} days ago", convert_time_to_days_ago(commit_stat.last_commit_time)));
+    }
+
+    println!("{commit_stats}");
 }
 
 fn handle_find(path: &PathBuf, exclude: &Option<Vec<String>>) {
@@ -200,3 +240,9 @@ fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
 //         println!("Name: {}", path.unwrap().path().display())
 //     }
 // }
+
+const MIDNIGHT: NaiveTime = NaiveTime::from_hms(0, 0, 0);
+
+fn to_datetime(date: NaiveDate) -> Option<DateTime<Local>> {
+    date.and_time(MIDNIGHT).and_local_timezone(Local).earliest()
+}
