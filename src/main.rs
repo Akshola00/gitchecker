@@ -2,8 +2,9 @@ use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime, Utc};
 use clap::error::Result;
 use clap::{Parser, Subcommand, arg, command};
 use git2::{Repository, Sort};
-// use std::fmt::format;
-// use std::fs::ReadDir;
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+
 use std::path::{Path, PathBuf};
 use std::{fs, process};
 
@@ -24,13 +25,15 @@ enum Commands {
         path: PathBuf,
         #[arg(short, long, value_parser = clap::value_parser!(NaiveDate), help = "Date 'Since' you want to fetch statistics from", )]
         since: Option<NaiveDate>,
-        #[arg(short, long, help = "The type you are want it in: 1 - Terminal")]
+        #[arg(short, long, help = "[1 - simple print, 2 - json file]")]
         format: Option<u8>,
     },
     #[command(about = "find all git repositories in a directory")]
     Find {
         #[arg(short, long, help = "/path/to/find-in")]
         path: PathBuf,
+        #[arg(short, long, help = "[1 - simple print, 2 - json file]")]
+        format: Option<u8>,
         #[arg(short, long, help = "Files you to exclude")]
         exclude: Option<Vec<String>>,
     },
@@ -41,8 +44,9 @@ enum Commands {
     },
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct CommitStats {
+    repo_name: String,
     total_commits: u32,
     commits_this_month: u32,
     commits_this_week: u32,
@@ -51,8 +55,9 @@ struct CommitStats {
 }
 
 impl CommitStats {
-    pub fn new() -> Self {
+    pub fn new(repo_name: String) -> Self {
         CommitStats {
+            repo_name,
             total_commits: 0,
             commits_this_month: 0,
             commits_this_week: 0,
@@ -61,15 +66,31 @@ impl CommitStats {
         }
     }
 }
-#[derive(Debug, Clone, Copy, Default)]
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct FindGitRepos {
+    dir: String,
+    num_repos: u32,
+    repos_found: Vec<String>
+}
+
+impl FindGitRepos {
+    fn new(dir: String) -> Self {
+        Self { dir, num_repos: 0, repos_found: vec![] }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct SinceCommitStat {
+    repo_name: String,
     since_time: NaiveDate,
     total_commits_since: u32,
 }
 
 impl SinceCommitStat {
-    pub fn new(since_time: NaiveDate) -> Self {
+    pub fn new(repo_name: String, since_time: NaiveDate) -> Self {
         Self {
+            repo_name,
             since_time,
             total_commits_since: 0,
         }
@@ -88,8 +109,8 @@ fn main() {
             } => {
                 handle_stats(path, since, format);
             }
-            Commands::Find { path, exclude } => {
-                handle_find(path, exclude);
+            Commands::Find { path, format, exclude } => {
+                handle_find(path, format, exclude);
             }
             Commands::Clean { path } => {
                 println!("'myapp add' was used, path is: {path:?}");
@@ -101,15 +122,17 @@ fn main() {
 
 fn handle_stats(path: &PathBuf, since_date: &Option<NaiveDate>, format: &Option<u8>) {
     let now = Utc::now();
-    let _since_date = since_date;
-    let _format = format;
 
-    let mut since_commit_stat = SinceCommitStat::new(_since_date.unwrap());
-    let mut commit_stat = CommitStats::new();
+    let since_date = since_date;
+
+    let format = format.unwrap_or(1);
 
     let month_ago = now - Duration::weeks(4);
+
     let week_ago = now - Duration::weeks(1);
+
     let today_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
+
     let repo: Repository = Repository::open(&path).unwrap_or_else(|err| {
         eprintln!("an error occured: {} ", err);
         process::exit(1);
@@ -128,23 +151,26 @@ fn handle_stats(path: &PathBuf, since_date: &Option<NaiveDate>, format: &Option<
     });
     let all_oids = revwalk.into_iter().collect::<Result<Vec<_>, _>>().unwrap();
 
-    match _since_date {
+    let mut commit_stat = CommitStats::new(get_repo_name(path));
+
+    match since_date {
         Some(date) => {
+            let mut since_commit_stat =
+                SinceCommitStat::new(get_repo_name(&path), since_date.unwrap_or_default());
+
             for oid in &all_oids {
                 let commit = repo.find_commit(*oid).unwrap();
                 let commit_time: git2::Time = commit.time();
-
                 let converted_time_of_commit: DateTime<chrono::Utc> =
                     DateTime::from_timestamp(commit_time.seconds(), 0).expect("Invalid Time");
-                // NaiveDate
-                let converted_date_time = to_datetime(_since_date.unwrap()).unwrap();
+                let converted_date_time = to_datetime(*date).unwrap();
                 if converted_time_of_commit >= converted_date_time {
                     since_commit_stat.total_commits_since += 1;
                 }
             }
+            since_commit_stats_display_or_json(format, &since_commit_stat);
         }
         None => {
-
             commit_stat.total_commits = all_oids.len() as u32;
 
             if let Some(last_oid) = all_oids.first() {
@@ -178,38 +204,15 @@ fn handle_stats(path: &PathBuf, since_date: &Option<NaiveDate>, format: &Option<
                     break;
                 }
             }
+            commit_stats_display_or_json(format, &commit_stat)
         }
     }
-
-    println!("all_commits_for_the_time {:?}", since_commit_stat);
-    let mut commit_stats = format!( "
-    Repository Statistics for: {:?}
-    ==============================================
-
-    📊 COMMIT STATISTICS
-    Total commits: {}
-    Commits this month: {}
-    Commits this week: {}
-    Commits today: {}
-    Last commit time: {}
-
-    ", path,
-        commit_stat.total_commits,
-        commit_stat.commits_this_month,
-        commit_stat.commits_this_week,
-        commit_stat.commits_today,
-        commit_stat.last_commit_time,
-        );
-
-    if convert_time_to_days_ago(commit_stat.last_commit_time) > 0 {
-        commit_stats.push_str(&format!(", {} days ago", convert_time_to_days_ago(commit_stat.last_commit_time)));
-    }
-
-    println!("{commit_stats}");
 }
 
-fn handle_find(path: &PathBuf, exclude: &Option<Vec<String>>) {
+fn handle_find(path: &PathBuf, format: &Option<u8>, exclude: &Option<Vec<String>>) {
     let read_dir = fs::read_dir(path).unwrap();
+
+    let mut found_repos = FindGitRepos::new(get_repo_name(path));
 
     for dir in read_dir {
         let entry = dir.unwrap();
@@ -221,10 +224,14 @@ fn handle_find(path: &PathBuf, exclude: &Option<Vec<String>>) {
                 .as_ref()
                 .map_or(false, |ex| ex.contains(&folder_name));
             if !is_excluded {
-                println!("Directory with git found {:?}", entry_path);
+                found_repos.num_repos += 1;
+                found_repos.repos_found.push(entry_path.to_string_lossy().to_string());
             }
         }
     }
+
+    find_repos_display_or_json(format.unwrap_or(1), &found_repos)
+
 }
 
 fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
@@ -233,16 +240,121 @@ fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
     diffrence.num_days()
 }
 
-// fn main() {
-//     let paths = fs::read_dir("/Users/macbookpro/Documents/projects").unwrap();
-
-//     for path in paths {
-//         println!("Name: {}", path.unwrap().path().display())
-//     }
-// }
-
-const MIDNIGHT: NaiveTime = NaiveTime::from_hms(0, 0, 0);
+const MIDNIGHT: NaiveTime = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
 
 fn to_datetime(date: NaiveDate) -> Option<DateTime<Local>> {
     date.and_time(MIDNIGHT).and_local_timezone(Local).earliest()
+}
+
+fn find_repos_display_or_json(format: u8, find_git_details: &FindGitRepos) {
+    match format {
+        1 => {
+            println!("gitchecker Checking for git dirs in {}: {} dierctories with git found, dirs with git found: {:#?}",
+                find_git_details.dir, find_git_details.num_repos, find_git_details.repos_found
+            )
+        }
+        2 => {
+           let file_name = format!(
+                "gitchecker_{}_find_repos.json",
+                find_git_details.dir
+            );
+
+            let file_path = PathBuf::from("./gitchecker_results").join(&file_name);
+
+            let mut file = File::create(&file_path).expect("Error creating file to write data");
+
+            serde_json::to_writer_pretty(&mut file, &find_git_details).unwrap();
+
+            println!("Repo Found here: {}", &file_path.display());   
+        }
+        _ => eprintln!("unsupported format")
+    }
+}
+
+fn since_commit_stats_display_or_json(format: u8, since_details: &SinceCommitStat) {
+    match format {
+        1 => {
+            let print_details = format!(
+                "gitchecker: {} commits for {} since {}",
+                since_details.total_commits_since,
+                since_details.repo_name,
+                since_details.since_time
+            );
+
+            println!("{print_details}");
+        }
+        2 => {
+            let file_name = format!(
+                "gitchecker_{}_since_{}_commit_stats.json",
+                since_details.repo_name, since_details.since_time
+            );
+
+            let file_path = PathBuf::from("./gitchecker_results").join(&file_name);
+
+            let mut file = File::create(&file_path).expect("Error creating file to write data");
+
+            serde_json::to_writer_pretty(&mut file, &since_details).unwrap();
+
+            println!("Since Commit Stats here: {}", &file_path.display());
+        }
+        _ => eprintln!("unsupported format"),
+    }
+}
+
+fn commit_stats_display_or_json(format: u8, commit_stat: &CommitStats) {
+    match format {
+        1 => {
+        let mut commit_stats = format!(
+        "
+         Repository Statistics for: {:?}
+         ==============================================
+
+         📊 COMMIT STATISTICS
+         Total commits: {}
+         Commits this month: {}
+         Commits this week: {}
+         Commits today: {}
+         Last commit time: {}
+
+         ",
+                commit_stat.repo_name,
+                commit_stat.total_commits,
+                commit_stat.commits_this_month,
+                commit_stat.commits_this_week,
+                commit_stat.commits_today,
+                commit_stat.last_commit_time,
+            );
+
+            if convert_time_to_days_ago(commit_stat.last_commit_time) > 0 {
+                commit_stats.push_str(&format!(
+                    ", {} days ago",
+                    convert_time_to_days_ago(commit_stat.last_commit_time)
+                ));
+            }
+
+            println!("{commit_stats}");
+        }
+        2 => {
+            let file_name = format!(
+                "gitchecker_{}_commit_stats.json",
+                commit_stat.repo_name
+            );
+
+            let file_path = PathBuf::from("./gitchecker_results").join(&file_name);
+
+            let mut file = File::create(&file_path).expect("Error creating file to write data");
+
+            serde_json::to_writer_pretty(&mut file, &commit_stat).unwrap();
+
+            println!("Commit Stats here: {}", &file_path.display());
+        }
+        _ => eprintln!("unsupported format"),
+    }
+}
+
+fn get_repo_name(path: &PathBuf) -> String {
+    let string_path = path.to_str().expect("Invalid string path");
+    let vec_path_data: Vec<&str> = string_path.split('/').collect();
+    let name = vec_path_data.last().unwrap().to_lowercase();
+    name
 }
