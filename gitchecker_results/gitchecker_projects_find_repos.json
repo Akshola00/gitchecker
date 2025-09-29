@@ -1,6 +1,6 @@
 {
   "dir": "projects",
-  "num_repos": 47,
+  "num_repos": 49,
   "repos_found": [
     "/Users/macbookpro/Documents/projects/starkRemit_contract",
     "/Users/macbookpro/Documents/projects/ZeroXBridge_Frontend",
@@ -20,6 +20,7 @@
     "/Users/macbookpro/Documents/projects/StakCastMaintainer",
     "/Users/macbookpro/Documents/projects/Aqua-Stark-Contracts",
     "/Users/macbookpro/Documents/projects/rust-week-1-exercises",
+    "/Users/macbookpro/Documents/projects/cloak_pay_frontend",
     "/Users/macbookpro/Documents/projects/autoswappr-backend",
     "/Users/macbookpro/Documents/projects/octaflip",
     "/Users/macbookpro/Documents/projects/invisible-sdk-demo",
@@ -44,6 +45,7 @@
     "/Users/macbookpro/Documents/projects/flipnet_dojo_hack",
     "/Users/macbookpro/Documents/projects/musicstrk",
     "/Users/macbookpro/Documents/projects/FortiChain-Dapp",
+    "/Users/macbookpro/Documents/projects/SRust-Soroban-examples",
     "/Users/macbookpro/Documents/projects/flipnet_hack_priv",
     "/Users/macbookpro/Documents/projects/skillnet-exam-contracts",
     "/Users/macbookpro/Documents/projects/FlipNet",

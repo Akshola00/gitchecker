@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime, Utc};
 use clap::error::Result;
 use clap::{Parser, Subcommand, arg, command};
-use git2::{Repository, Sort};
+use git2::{Repository, Sort, Status, StatusOptions, opts};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 
@@ -41,6 +41,20 @@ enum Commands {
     Clean {
         #[arg(short, long, help = "/path/to/clean")]
         path: PathBuf,
+        #[arg(short, long, help = "clean untracked files")]
+        untracked: Option<bool>,
+        #[arg(short, long, help = "clean ignored files")]
+        ignored: Option<bool>,
+        #[arg(short, long, help = "clean merged branches")]
+        branches: Option<bool>,
+        #[arg(short, long, help = "clean merged branches")]
+        stash: Option<bool>,
+        #[arg(
+            short = 'S',
+            long = "ignore_submodules",
+            help = "ignore submodule files"
+        )]
+        ignore_submodules: Option<bool>,
     },
 }
 
@@ -71,12 +85,16 @@ impl CommitStats {
 struct FindGitRepos {
     dir: String,
     num_repos: u32,
-    repos_found: Vec<String>
+    repos_found: Vec<String>,
 }
 
 impl FindGitRepos {
     fn new(dir: String) -> Self {
-        Self { dir, num_repos: 0, repos_found: vec![] }
+        Self {
+            dir,
+            num_repos: 0,
+            repos_found: vec![],
+        }
     }
 }
 
@@ -109,11 +127,29 @@ fn main() {
             } => {
                 handle_stats(path, since, format);
             }
-            Commands::Find { path, format, exclude } => {
+            Commands::Find {
+                path,
+                format,
+                exclude,
+            } => {
                 handle_find(path, format, exclude);
             }
-            Commands::Clean { path } => {
-                println!("'myapp add' was used, path is: {path:?}");
+            Commands::Clean {
+                path,
+                untracked,
+                ignored,
+                branches,
+                stash,
+                ignore_submodules,
+            } => {
+                clean_repo(
+                    path,
+                    untracked.unwrap_or(false),
+                    ignored.unwrap_or(false),
+                    branches.unwrap_or(false),
+                    stash.unwrap_or(false),
+                    ignore_submodules.unwrap_or(false),
+                );
             }
         },
         None => todo!(),
@@ -225,13 +261,60 @@ fn handle_find(path: &PathBuf, format: &Option<u8>, exclude: &Option<Vec<String>
                 .map_or(false, |ex| ex.contains(&folder_name));
             if !is_excluded {
                 found_repos.num_repos += 1;
-                found_repos.repos_found.push(entry_path.to_string_lossy().to_string());
+                found_repos
+                    .repos_found
+                    .push(entry_path.to_string_lossy().to_string());
             }
         }
     }
 
     find_repos_display_or_json(format.unwrap_or(1), &found_repos)
+}
 
+fn clean_repo(
+    path: &PathBuf,
+    untracked: bool,
+    ignored: bool,
+    branches: bool,
+    stash: bool,
+    ignore_submodules: bool,
+) {
+    // check if theres a repo in that path
+    let repo: Repository = Repository::open(&path).unwrap_or_else(|err| {
+        eprintln!("an error occured: {} ", err);
+        process::exit(1);
+    });
+
+    // create a new git 2 status struct
+    let mut opts = StatusOptions::new();
+
+    // choose weather to include ignore files
+    opts.include_ignored(ignored);
+
+    // choose weather to add tracked or untracked files
+    if untracked {
+        opts.include_untracked(true);
+    } else {
+        opts.include_untracked(false);
+    }
+
+    // choose weather ignore submodules
+    if ignore_submodules {
+        opts.exclude_submodules(true);
+    } else {
+        opts.exclude_submodules(false);
+    }
+
+    // println!("\u{1b}[H\u{1b}[2J \n");
+
+    let statuses: git2::Statuses<'_> = repo
+        .statuses(Some(&mut opts))
+        .map_err(|e| println!("{}", e.to_string()))
+        .unwrap();
+
+    details(statuses);
+
+    println!("This is after the screen clear.");
 }
 
 fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
@@ -249,15 +332,13 @@ fn to_datetime(date: NaiveDate) -> Option<DateTime<Local>> {
 fn find_repos_display_or_json(format: u8, find_git_details: &FindGitRepos) {
     match format {
         1 => {
-            println!("gitchecker Checking for git dirs in {}: {} dierctories with git found, dirs with git found: {:#?}",
+            println!(
+                "gitchecker Checking for git dirs in {}: {} dierctories with git found, dirs with git found: {:#?}",
                 find_git_details.dir, find_git_details.num_repos, find_git_details.repos_found
             )
         }
         2 => {
-           let file_name = format!(
-                "gitchecker_{}_find_repos.json",
-                find_git_details.dir
-            );
+            let file_name = format!("gitchecker_{}_find_repos.json", find_git_details.dir);
 
             let file_path = PathBuf::from("./gitchecker_results").join(&file_name);
 
@@ -265,9 +346,9 @@ fn find_repos_display_or_json(format: u8, find_git_details: &FindGitRepos) {
 
             serde_json::to_writer_pretty(&mut file, &find_git_details).unwrap();
 
-            println!("Repo Found here: {}", &file_path.display());   
+            println!("Repo Found here: {}", &file_path.display());
         }
-        _ => eprintln!("unsupported format")
+        _ => eprintln!("unsupported format"),
     }
 }
 
@@ -304,8 +385,8 @@ fn since_commit_stats_display_or_json(format: u8, since_details: &SinceCommitSta
 fn commit_stats_display_or_json(format: u8, commit_stat: &CommitStats) {
     match format {
         1 => {
-        let mut commit_stats = format!(
-        "
+            let mut commit_stats = format!(
+                "
          Repository Statistics for: {:?}
          ==============================================
 
@@ -335,10 +416,7 @@ fn commit_stats_display_or_json(format: u8, commit_stat: &CommitStats) {
             println!("{commit_stats}");
         }
         2 => {
-            let file_name = format!(
-                "gitchecker_{}_commit_stats.json",
-                commit_stat.repo_name
-            );
+            let file_name = format!("gitchecker_{}_commit_stats.json", commit_stat.repo_name);
 
             let file_path = PathBuf::from("./gitchecker_results").join(&file_name);
 
@@ -357,4 +435,39 @@ fn get_repo_name(path: &PathBuf) -> String {
     let vec_path_data: Vec<&str> = string_path.split('/').collect();
     let name = vec_path_data.last().unwrap().to_lowercase();
     name
+}
+
+fn details(statuses: git2::Statuses) {
+    for status in statuses.iter().filter(|e| e.status() != Status::CURRENT) {
+        let path = Path::new(
+            status
+                .path()
+                .expect("expected string representation of path"),
+        );
+
+        println!("path {} status {:?}", path.display(), status.status());
+
+        match status.status() {
+            Status::WT_NEW => {
+                if path.is_dir() {
+                    println!("Removing untracked Directory: {} \n", path.display());
+                    // fs::remove_dir(path).expect("Failed to remove directory");
+                } else if path.is_file() {
+                    println!("Removing untracked File: {} \n", path.display());
+                    // fs::remove_file(path).expect("Failed to remove path");
+                }
+            }
+
+            Status::IGNORED => {
+                if path.is_dir() {
+                    println!("Removing Ignored Directory: {} \n", path.display());
+                    // fs::remove_dir(path).expect("Failed to remove directory");
+                } else if path.is_file() {
+                    println!("Removing Ignored File: {} \n", path.display());
+                    // fs::remove_file(path).expect("Failed to remove path");
+                }
+            }
+            _ => println!("Ignored Not now"),
+        }
+    }
 }
