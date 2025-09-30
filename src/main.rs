@@ -299,7 +299,7 @@ fn clean_repo(
     }
 
     // choose weather ignore submodules
-    // if the user passes -S true then submodules should be excluded if they dont or if it is false then submodules should not be excluded 
+    // if the user passes -S true then submodules should be excluded if they dont or if it is false then submodules should not be excluded
     // what i want is that when a user runs the command he must pass in the flag of what excaclty he wants if not nothing will happen (this is working)
     if ignore_submodules {
         opts.exclude_submodules(true);
@@ -313,7 +313,6 @@ fn clean_repo(
         .unwrap();
 
     basic_clean(statuses);
-
 }
 
 fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
@@ -464,7 +463,11 @@ fn basic_clean(statuses: git2::Statuses) {
                     fs::remove_file(path).expect("Failed to remove path");
                 }
             }
-            _ => println!("Ignored Not now {} and status {:?}", path.display(), status.status()),
+            _ => println!(
+                "Ignored Not now {} and status {:?}",
+                path.display(),
+                status.status()
+            ),
         }
     }
 }
