@@ -1,7 +1,7 @@
 use chrono::{DateTime, Duration, Local, NaiveDate, NaiveTime, Utc};
 use clap::error::Result;
 use clap::{Parser, Subcommand, arg, command};
-use git2::{Repository, Sort, Status, StatusOptions, opts};
+use git2::{Repository, Sort, Status, StatusOptions};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 
@@ -275,8 +275,8 @@ fn clean_repo(
     path: &PathBuf,
     untracked: bool,
     ignored: bool,
-    branches: bool,
-    stash: bool,
+    _branches: bool,
+    _stash: bool,
     ignore_submodules: bool,
 ) {
     // check if theres a repo in that path
@@ -299,22 +299,21 @@ fn clean_repo(
     }
 
     // choose weather ignore submodules
+    // if the user passes -S true then submodules should be excluded if they dont or if it is false then submodules should not be excluded 
+    // what i want is that when a user runs the command he must pass in the flag of what excaclty he wants if not nothing will happen (this is working)
     if ignore_submodules {
         opts.exclude_submodules(true);
     } else {
         opts.exclude_submodules(false);
     }
 
-    // println!("\u{1b}[H\u{1b}[2J \n");
-
     let statuses: git2::Statuses<'_> = repo
         .statuses(Some(&mut opts))
         .map_err(|e| println!("{}", e.to_string()))
         .unwrap();
 
-    details(statuses);
+    basic_clean(statuses);
 
-    println!("This is after the screen clear.");
 }
 
 fn convert_time_to_days_ago(time: DateTime<Utc>) -> i64 {
@@ -437,7 +436,7 @@ fn get_repo_name(path: &PathBuf) -> String {
     name
 }
 
-fn details(statuses: git2::Statuses) {
+fn basic_clean(statuses: git2::Statuses) {
     for status in statuses.iter().filter(|e| e.status() != Status::CURRENT) {
         let path = Path::new(
             status
@@ -445,29 +444,27 @@ fn details(statuses: git2::Statuses) {
                 .expect("expected string representation of path"),
         );
 
-        println!("path {} status {:?}", path.display(), status.status());
-
         match status.status() {
             Status::WT_NEW => {
                 if path.is_dir() {
                     println!("Removing untracked Directory: {} \n", path.display());
-                    // fs::remove_dir(path).expect("Failed to remove directory");
+                    fs::remove_dir_all(path).expect("Failed to remove directory");
                 } else if path.is_file() {
                     println!("Removing untracked File: {} \n", path.display());
-                    // fs::remove_file(path).expect("Failed to remove path");
+                    fs::remove_file(path).expect("Failed to remove path");
                 }
             }
 
             Status::IGNORED => {
                 if path.is_dir() {
                     println!("Removing Ignored Directory: {} \n", path.display());
-                    // fs::remove_dir(path).expect("Failed to remove directory");
+                    fs::remove_dir_all(path).expect("Failed to remove directory");
                 } else if path.is_file() {
                     println!("Removing Ignored File: {} \n", path.display());
-                    // fs::remove_file(path).expect("Failed to remove path");
+                    fs::remove_file(path).expect("Failed to remove path");
                 }
             }
-            _ => println!("Ignored Not now"),
+            _ => println!("Ignored Not now {} and status {:?}", path.display(), status.status()),
         }
     }
 }
