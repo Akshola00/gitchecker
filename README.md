@@ -172,8 +172,4 @@ When using `--format 2`, JSON files are written to `./gitchecker_results/` relat
 - Time calculations are based on your system clock and UTC conversions; ensure system time is correct.
 - For macOS/Linux, no special setup for `libgit2` is usually required; the `git2` crate bundles/links what it needs.
 
-### License
-
-Unspecified. If you plan to distribute, add a license of your choice (e.g., MIT/Apache-2.0).
-
 
